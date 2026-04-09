@@ -27,6 +27,9 @@ import {
   Video,
   Mic,
   Camera,
+  Sparkles,
+  HelpCircle,
+  ChevronDown,
   Image as ImageIcon,
   Map as MapIcon,
   Navigation,
@@ -38,14 +41,21 @@ import {
   LogOut,
   Download,
   Table,
-  TrendingUp
+  TrendingUp,
+  Volume2,
+  VolumeX,
+  FastForward,
+  Play,
+  Pause,
+  Ear
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
+import { GoogleGenAI } from "@google/genai";
 
 // --- Types ---
 type Tab = 'home' | 'medical' | 'community' | 'profile';
-type View = 'main' | 'consultation' | 'reports' | 'report_detail' | 'devices' | 'device_connect' | 'indicator_detail' | 'indicator_record' | 'aed_map' | 'medical_map' | 'medical_path' | 'medication_management' | 'event_detail' | 'guide_detail' | 'indicator_history_detail' | 'service_detail' | 'health_score_detail' | 'emergency_contacts' | 'medication_add' | 'video_player' | 'notice_detail' | 'search_results' | 'settings' | 'privacy_security' | 'medical_history' | 'allergy_history' | 'physical_exam_reports' | 'physical_exam_record' | 'emergency' | 'edit_profile' | 'login';
+type View = 'main' | 'consultation' | 'reports' | 'report_detail' | 'devices' | 'device_connect' | 'indicator_detail' | 'indicator_record' | 'aed_map' | 'medical_map' | 'medical_path' | 'medication_management' | 'event_detail' | 'guide_detail' | 'indicator_history_detail' | 'service_detail' | 'health_score_detail' | 'emergency_contacts' | 'medication_add' | 'video_player' | 'notice_detail' | 'search_results' | 'settings' | 'privacy_security' | 'medical_history' | 'allergy_history' | 'physical_exam_reports' | 'physical_exam_record' | 'emergency' | 'edit_profile' | 'login' | 'ai_assistant';
 
 interface Message {
   id: number;
@@ -259,6 +269,88 @@ export default function App() {
     { id: 2, time: '12:30', name: '维生素C', status: 'pending' },
     { id: 3, time: '20:00', name: '降压药', status: 'pending' },
   ]);
+  const [aiMessages, setAiMessages] = useState<Message[]>([
+    { id: 1, text: "您好！我是您的AI健康助手。您可以问我关于健康管理、疾病预防或个性化生活建议的问题。", sender: 'doctor', time: '10:00' }
+  ]);
+  const [aiInputText, setAiInputText] = useState("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isFaqOpen, setIsFaqOpen] = useState(true);
+  const [isHearingAidActive, setIsHearingAidActive] = useState(false);
+  const [hearingAidText, setHearingAidText] = useState("");
+  const [hearingAidVolume, setHearingAidVolume] = useState(100);
+  const [hearingAidSpeed, setHearingAidSpeed] = useState(1.0);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'zh-CN';
+
+      recognitionRef.current.onresult = (event: any) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+        
+        if (finalTranscript) {
+          setHearingAidText(prev => prev + finalTranscript + ' ');
+        }
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        if (isListening) {
+          recognitionRef.current.start();
+        }
+      };
+    }
+  }, [isListening]);
+
+  const toggleHearingAid = () => {
+    if (!isHearingAidActive) {
+      setIsHearingAidActive(true);
+      setHearingAidText("");
+    } else {
+      setIsHearingAidActive(false);
+      if (isListening) {
+        recognitionRef.current?.stop();
+        setIsListening(false);
+      }
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      setHearingAidText("");
+      recognitionRef.current?.start();
+      setIsListening(true);
+    }
+  };
+
+  const faqQuestions = [
+    "如何预防高血压？",
+    "突发胸痛应该怎么办？",
+    "糖尿病患者的饮食建议？",
+    "中老年人如何科学锻炼？",
+    "跌倒后如何进行初步处理？"
+  ];
 
   const handleSendMessage = () => {
     if (!inputText.trim()) return;
@@ -283,21 +375,76 @@ export default function App() {
     }, 1500);
   };
 
+  const handleAiMessage = async (presetText?: string) => {
+    const textToSubmit = presetText || aiInputText;
+    if (!textToSubmit.trim() || isAiLoading) return;
+    
+    const text = textToSubmit;
+    const userMsg: Message = {
+      id: Date.now(),
+      text,
+      sender: 'user',
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    
+    setAiMessages(prev => [...prev, userMsg]);
+    if (!presetText) setAiInputText("");
+    setIsAiLoading(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: text,
+        config: {
+          systemInstruction: `你是一位专业的AI健康助手，专门为中老年人提供健康管理和疾病预防的建议。当前用户是${userProfile.name}，他是一位中老年人。你的回答应该亲切、耐心、专业且易于理解。请根据用户的问题提供个性化的健康建议。如果涉及到紧急情况或潜在的急症（如胸痛、跌倒、呼吸困难等），请务必在回答中包含明确的“急救建议”步骤。如果涉及到严重的医疗问题，请务必提醒用户咨询专业医生或拨打急救电话。`,
+        }
+      });
+
+      const aiMsg: Message = {
+        id: Date.now() + 1,
+        text: response.text || "抱歉，我暂时无法回答这个问题。请稍后再试。",
+        sender: 'doctor',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setAiMessages(prev => [...prev, aiMsg]);
+    } catch (error) {
+      console.error("AI Error:", error);
+      const errorMsg: Message = {
+        id: Date.now() + 1,
+        text: "抱歉，连接AI助手时出现了点问题。请检查您的网络连接。",
+        sender: 'doctor',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setAiMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
   const renderMainContent = () => {
     switch (activeTab) {
       case 'home':
         return (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="pb-24">
             <div className="p-4 space-y-6">
-              {/* Search Bar */}
-              <div className="search-bar" onClick={() => setCurrentView('search_results')}>
-                <Search className="w-5 h-5" />
-                <input 
-                  type="text" 
-                  readOnly
-                  placeholder="搜索急救知识、医生、社区服务..." 
-                  className="bg-transparent border-none outline-none w-full text-sm text-slate-600 placeholder:text-purple-300 cursor-pointer" 
-                />
+              {/* Search Bar & AI Assistant */}
+              <div className="flex gap-3 items-center">
+                <div className="search-bar flex-1" onClick={() => setCurrentView('search_results')}>
+                  <Search className="w-5 h-5" />
+                  <input 
+                    type="text" 
+                    readOnly
+                    placeholder="搜索急救知识、医生..." 
+                    className="bg-transparent border-none outline-none w-full text-sm text-slate-600 placeholder:text-purple-300 cursor-pointer" 
+                  />
+                </div>
+                <button 
+                  onClick={() => setCurrentView('ai_assistant')}
+                  className="w-10 h-10 rounded-full bg-white shadow-sm border border-purple-100 flex items-center justify-center shrink-0 active:scale-90 transition-transform"
+                >
+                  <Sparkles className="w-5 h-5 text-design-purple" />
+                </button>
               </div>
 
               {/* Health Summary Card */}
@@ -1026,6 +1173,193 @@ export default function App() {
               </div>
 
               <div className="h-24"></div>
+            </div>
+          </motion.div>
+        );
+      case 'ai_assistant':
+        return (
+          <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="fixed inset-0 max-w-6xl mx-auto bg-design-bg z-[60] flex flex-col">
+            <SubPageHeader 
+              title="AI健康助手" 
+              onBack={() => setCurrentView('main')} 
+              rightElement={
+                <div className="flex gap-2">
+                  <button 
+                    className={cn("p-2 rounded-full transition-colors", isHearingAidActive ? "bg-design-purple text-white" : "text-design-purple")} 
+                    onClick={toggleHearingAid}
+                    title="AI助听器"
+                  >
+                    <Ear className="w-5 h-5" />
+                  </button>
+                  <button className="p-2 text-design-purple" onClick={() => setAiMessages([{ id: 1, text: "您好！我是您的AI健康助手。您可以问我关于健康管理、疾病预防或个性化生活建议的问题。", sender: 'doctor', time: '10:00' }])}>
+                    <Clock className="w-5 h-5" />
+                  </button>
+                </div>
+              }
+            />
+            
+            <AnimatePresence>
+              {isHearingAidActive && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="bg-white border-b border-purple-100 overflow-hidden"
+                >
+                  <div className="p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                        <span className="text-sm font-bold text-slate-700">AI 助听器模式</span>
+                      </div>
+                      <button 
+                        onClick={toggleListening}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all",
+                          isListening ? "bg-red-50 text-red-500" : "bg-design-purple text-white"
+                        )}
+                      >
+                        {isListening ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                        {isListening ? "停止监听" : "开始监听"}
+                      </button>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-2xl p-4 min-h-[120px] max-h-[200px] overflow-y-auto border border-slate-100">
+                      {hearingAidText ? (
+                        <p className="text-lg font-medium text-slate-800 leading-relaxed" style={{ fontSize: `${(hearingAidVolume / 100) * 1.2 + 0.8}rem` }}>
+                          {hearingAidText}
+                        </p>
+                      ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 py-8">
+                          <Mic className="w-8 h-8 opacity-20" />
+                          <p className="text-sm">点击“开始监听”以实时转写语音</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                          <span className="flex items-center gap-1"><Volume2 className="w-3 h-3" /> 文字大小</span>
+                          <span>{hearingAidVolume}%</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="50" 
+                          max="200" 
+                          value={hearingAidVolume}
+                          onChange={(e) => setHearingAidVolume(parseInt(e.target.value))}
+                          className="w-full accent-design-purple h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                          <span className="flex items-center gap-1"><FastForward className="w-3 h-3" /> 刷新频率</span>
+                          <span>{hearingAidSpeed.toFixed(1)}x</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="0.5" 
+                          max="2.0" 
+                          step="0.1"
+                          value={hearingAidSpeed}
+                          onChange={(e) => setHearingAidSpeed(parseFloat(e.target.value))}
+                          className="w-full accent-design-purple h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            
+            {/* FAQ Collapsible */}
+            <div className="bg-white border-b border-purple-50">
+              <button 
+                onClick={() => setIsFaqOpen(!isFaqOpen)}
+                className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-slate-700"
+              >
+                <div className="flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4 text-design-purple" />
+                  常见健康问题
+                </div>
+                <ChevronDown className={cn("w-4 h-4 transition-transform", isFaqOpen && "rotate-180")} />
+              </button>
+              <AnimatePresence>
+                {isFaqOpen && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-4 pb-4 flex flex-wrap gap-2">
+                      {faqQuestions.map((q, idx) => (
+                        <button 
+                          key={idx}
+                          onClick={() => handleAiMessage(q)}
+                          className="px-3 py-2 bg-purple-50 text-design-purple text-xs rounded-full border border-purple-100 active:scale-95 transition-transform"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-purple-50/30">
+              {aiMessages.map((msg) => (
+                <div key={msg.id} className={cn("flex gap-3", msg.sender === 'user' ? "flex-row-reverse" : "")}>
+                  <div className={cn("w-10 h-10 rounded-full flex items-center justify-center shrink-0", msg.sender === 'user' ? "bg-design-purple" : "bg-white shadow-sm")}>
+                    {msg.sender === 'user' ? <UserIcon className="w-6 h-6 text-white" /> : <Sparkles className="w-6 h-6 text-design-purple" />}
+                  </div>
+                  <div className={cn(
+                    "max-w-[75%] p-4 rounded-2xl text-sm leading-relaxed",
+                    msg.sender === 'user' ? "bg-design-purple text-white rounded-tr-none" : "bg-white text-slate-700 rounded-tl-none shadow-sm"
+                  )}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              {isAiLoading && (
+                <div className="flex gap-3">
+                  <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center shrink-0">
+                    <Sparkles className="w-6 h-6 text-design-purple animate-pulse" />
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm flex gap-1">
+                    <div className="w-1.5 h-1.5 bg-design-purple/30 rounded-full animate-bounce"></div>
+                    <div className="w-1.5 h-1.5 bg-design-purple/30 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                    <div className="w-1.5 h-1.5 bg-design-purple/30 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="p-4 bg-white border-t border-purple-50 flex gap-3 items-center">
+              <div className="flex-1 relative">
+                <input 
+                  type="text" 
+                  value={aiInputText}
+                  onChange={(e) => setAiInputText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAiMessage()}
+                  placeholder="问问AI助手健康建议..." 
+                  className="w-full bg-slate-50 border-none rounded-2xl p-4 pr-12 text-sm outline-none focus:ring-2 focus:ring-design-purple/20 transition-all"
+                />
+                <button className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-300">
+                  <Mic className="w-5 h-5" />
+                </button>
+              </div>
+              <button 
+                onClick={handleAiMessage}
+                disabled={isAiLoading || !aiInputText.trim()}
+                className={cn(
+                  "w-12 h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95",
+                  aiInputText.trim() ? "bg-design-purple text-white shadow-lg shadow-purple-100" : "bg-slate-100 text-slate-300"
+                )}
+              >
+                <Send className="w-6 h-6" />
+              </button>
             </div>
           </motion.div>
         );
@@ -2888,7 +3222,11 @@ export default function App() {
       </AnimatePresence>
 
       {/* Bottom Navigation */}
-      <NavBar activeTab={activeTab} setActiveTab={setActiveTab} onSosTrigger={() => setCurrentView('emergency')} />
+      <NavBar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        onSosTrigger={() => setCurrentView('emergency')} 
+      />
 
       {/* Export Modal */}
       <ExportModal 
